@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hawkapi-websockets"
+version = "0.1.0"
+description = "WebSocket utilities for HawkAPI — rooms, broadcasting, Redis pub/sub, auth integration"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+authors = [
+    { name = "HawkAPI Contributors", email = "hawkapi@users.noreply.github.com" },
+]
+keywords = ["hawkapi", "websockets", "pubsub", "redis", "broadcast", "rooms"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: WSGI",
+    "Typing :: Typed",
+]
+dependencies = ["hawkapi>=0.1.7"]
+
+[project.optional-dependencies]
+redis = ["redis>=5.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "redis>=5.0",
+    "ruff>=0.8",
+    "pyright>=1.1",
+]
+
+[project.urls]
+Homepage = "https://pypi.org/project/hawkapi-websockets/"
+Repository = "https://github.com/ashimov/hawkapi-websockets"
+Issues = "https://github.com/ashimov/hawkapi-websockets/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hawkapi_websockets"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S"]
+ignore = ["S101", "S110", "B008", "SIM105", "SIM108"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportMissingTypeStubs = false
