@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-05-16
+
+`HeartbeatMonitor.is_alive(cid)` now returns `False` for connections that
+were never `touch()`ed. Previously the default `last_seen=0` plus a small
+`time.monotonic()` value (on a freshly-started process) could yield a
+delta inside the timeout window, falsely reporting unseen connections as
+alive.
+
 ## 0.2.0 — 2026-05-16
 
 Security hardening:

@@ -46,7 +46,9 @@ class HeartbeatMonitor:
         self._last_seen[connection_id] = time.monotonic()
 
     def is_alive(self, connection_id: str) -> bool:
-        last = self._last_seen.get(connection_id, 0)
+        last = self._last_seen.get(connection_id)
+        if last is None:
+            return False
         return (time.monotonic() - last) <= self.config.timeout_seconds
 
     async def tick(self) -> int:
