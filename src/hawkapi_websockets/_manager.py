@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -36,11 +37,17 @@ class Connection:
         await self.websocket.send_bytes(data)
 
 
+RoomValidator = Callable[[str, Connection], "Awaitable[bool] | bool"]
+
+
 @dataclass
 class ConnectionManager:
     connections: dict[str, Connection] = field(default_factory=dict)
     rooms: dict[str, set[str]] = field(default_factory=dict)
-    backpressure_queue_size: int = 64
+    send_timeout_seconds: float = 5.0
+    max_connections: int | None = None
+    room_validator: RoomValidator | None = field(default=None)
+    disconnect_hooks: list[Callable[[str], None]] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def connect(
@@ -52,6 +59,8 @@ class ConnectionManager:
         rooms: Iterable[str] = (),
     ) -> Connection:
         async with self._lock:
+            if self.max_connections is not None and len(self.connections) >= self.max_connections:
+                raise RuntimeError(f"max connections {self.max_connections} reached")
             cid = connection_id or uuid.uuid4().hex
             conn = Connection(
                 id=cid,
@@ -75,9 +84,34 @@ class ConnectionManager:
                     members.discard(connection_id)
                     if not members:
                         self.rooms.pop(room, None)
+        # Run hooks outside the lock so they can call back into the manager.
+        for hook in list(self.disconnect_hooks):
+            try:
+                hook(connection_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("disconnect hook raised for %s: %s", connection_id, exc)
 
     async def join(self, connection_id: str, room: str) -> None:
+        """Add ``connection_id`` to ``room``.
+
+        If a :attr:`room_validator` is configured, it is invoked with
+        ``(room, connection)`` and must return ``True`` (or an awaitable that
+        resolves to ``True``) for the join to be accepted. A falsy return value
+        raises :class:`PermissionError`.
+        """
         async with self._lock:
+            conn = self.connections.get(connection_id)
+            if conn is None:
+                return
+            validator = self.room_validator
+        if validator is not None:
+            decision = validator(room, conn)
+            if inspect.isawaitable(decision):
+                decision = await decision
+            if not decision:
+                raise PermissionError(f"join denied for room {room!r}")
+        async with self._lock:
+            # Re-fetch in case the connection went away while we awaited.
             conn = self.connections.get(connection_id)
             if conn is None:
                 return
@@ -105,7 +139,7 @@ class ConnectionManager:
     ) -> int:
         """Send ``data`` to every connection (or every member of ``room``). Returns send count."""
         exclude_set = set(exclude)
-        targets = self._targets(room, exclude_set)
+        targets = await self._snapshot_targets(room, exclude_set)
 
         async def _send(c: Connection) -> None:
             await c.send_text(data)
@@ -123,16 +157,17 @@ class ConnectionManager:
         return await self.broadcast_text(payload, room=room, exclude=exclude)
 
     async def send_to(self, connection_id: str, data: Any) -> bool:
-        conn = self.connections.get(connection_id)
+        async with self._lock:
+            conn = self.connections.get(connection_id)
         if conn is None:
             return False
         try:
             if isinstance(data, str):
-                await conn.send_text(data)
+                await asyncio.wait_for(conn.send_text(data), timeout=self.send_timeout_seconds)
             elif isinstance(data, bytes):
-                await conn.send_bytes(data)
+                await asyncio.wait_for(conn.send_bytes(data), timeout=self.send_timeout_seconds)
             else:
-                await conn.send_json(data)
+                await asyncio.wait_for(conn.send_json(data), timeout=self.send_timeout_seconds)
         except Exception as exc:
             logger.warning("send_to %s failed: %s", connection_id, exc)
             await self.disconnect(connection_id)
@@ -151,15 +186,18 @@ class ConnectionManager:
 
     async def close_all(self, code: int = 1000) -> None:
         """Close every open WebSocket. Useful at shutdown."""
-        ids = list(self.connections)
-        for cid in ids:
-            conn = self.connections.get(cid)
-            if conn is not None:
-                try:
-                    await conn.websocket.close(code=code)
-                except Exception:
-                    pass
+        async with self._lock:
+            snapshot = list(self.connections.items())
+        for cid, conn in snapshot:
+            try:
+                await conn.websocket.close(code=code)
+            except Exception:
+                pass
             await self.disconnect(cid)
+
+    async def _snapshot_targets(self, room: str | None, exclude: set[str]) -> list[Connection]:
+        async with self._lock:
+            return self._targets(room, exclude)
 
     def _targets(self, room: str | None, exclude: set[str]) -> list[Connection]:
         if room is None:
@@ -185,7 +223,7 @@ class ConnectionManager:
 
     async def _safe(self, conn: Connection, fn: Any) -> bool:
         try:
-            await fn(conn)
+            await asyncio.wait_for(fn(conn), timeout=self.send_timeout_seconds)
             return True
         except Exception as exc:
             logger.warning("dispatch to %s failed: %s", conn.id, exc)
@@ -193,4 +231,4 @@ class ConnectionManager:
             return False
 
 
-__all__ = ["Connection", "ConnectionManager", "WebSocketLike"]
+__all__ = ["Connection", "ConnectionManager", "RoomValidator", "WebSocketLike"]

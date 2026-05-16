@@ -23,6 +23,24 @@ class HeartbeatMonitor:
     _last_seen: dict[str, float] = field(default_factory=dict, init=False)
     _task: asyncio.Task[None] | None = field(default=None, init=False)
     _stop: asyncio.Event = field(default_factory=asyncio.Event, init=False)
+    _hooked: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        self._ensure_hook()
+
+    def _ensure_hook(self) -> None:
+        if self._hooked:
+            return
+        hooks = getattr(self.manager, "disconnect_hooks", None)
+        if hooks is None:  # pragma: no cover - defensive
+            return
+        if self.disconnect_hook not in hooks:
+            hooks.append(self.disconnect_hook)
+        self._hooked = True
+
+    def disconnect_hook(self, connection_id: str) -> None:
+        """Prune ``_last_seen`` when a connection is removed from the manager."""
+        self._last_seen.pop(connection_id, None)
 
     def touch(self, connection_id: str) -> None:
         self._last_seen[connection_id] = time.monotonic()
@@ -33,6 +51,13 @@ class HeartbeatMonitor:
 
     async def tick(self) -> int:
         """Send one heartbeat round; close dead connections. Returns number of pings sent."""
+        self._ensure_hook()
+        # Prune stale entries for connections that disappeared without going
+        # through the manager's disconnect path (e.g. test helpers).
+        active = set(self.manager.connections)
+        for cid in list(self._last_seen):
+            if cid not in active:
+                self._last_seen.pop(cid, None)
         sent = 0
         now = time.monotonic()
         for cid in list(self.manager.connections):

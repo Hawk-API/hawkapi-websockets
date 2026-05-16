@@ -12,7 +12,7 @@ from ._manager import Connection, ConnectionManager, WebSocketLike
 from ._plugin import get_manager, init_websockets, resolve_manager
 from ._pubsub import RedisBackplane, bind_manager
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Connection",

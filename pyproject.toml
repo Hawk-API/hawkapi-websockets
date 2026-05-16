@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hawkapi-websockets"
-version = "0.1.0"
+version = "0.2.0"
 description = "WebSocket utilities for HawkAPI — rooms, broadcasting, Redis pub/sub, auth integration"
 readme = "README.md"
 license = { file = "LICENSE" }

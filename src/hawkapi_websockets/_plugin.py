@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from typing import Any
 
 from hawkapi import HTTPException, Request
@@ -14,8 +15,16 @@ class _StateNamespace:
     websockets: Any
 
 
-_ACTIVE: dict[int, ConnectionManager] = {}
+_ACTIVE: weakref.WeakKeyDictionary[Any, ConnectionManager] = weakref.WeakKeyDictionary()
 _LAST: list[ConnectionManager | None] = [None]
+
+
+def _try_remember(app: Any, manager: ConnectionManager) -> None:
+    try:
+        _ACTIVE[app] = manager
+    except TypeError:
+        # Unhashable or non-weakref-able app — silently skip the cache.
+        pass
 
 
 def init_websockets(
@@ -50,7 +59,7 @@ def init_websockets(
     if getattr(app, "state", None) is None:
         app.state = _StateNamespace()
     app.state.websockets = manager
-    _ACTIVE[id(app)] = manager
+    _try_remember(app, manager)
     _LAST[0] = manager
     return manager
 
@@ -58,7 +67,10 @@ def init_websockets(
 def resolve_manager(app: Any) -> ConnectionManager | None:
     if app is None:
         return _LAST[0]
-    found = _ACTIVE.get(id(app))
+    try:
+        found = _ACTIVE.get(app)
+    except TypeError:
+        found = None
     if found is not None:
         return found
     state = getattr(app, "state", None)

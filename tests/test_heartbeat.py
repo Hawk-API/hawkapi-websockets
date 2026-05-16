@@ -39,3 +39,18 @@ def test_touch_updates_last_seen() -> None:
     mon = HeartbeatMonitor(manager=ConnectionManager())
     mon.touch("a")
     assert mon.is_alive("a") is True
+
+
+async def test_last_seen_pruned_on_external_disconnect() -> None:
+    m = ConnectionManager()
+    await m.connect(FakeWebSocket(), connection_id="a")
+    mon = HeartbeatMonitor(manager=m)
+    mon.touch("a")
+    assert "a" in mon._last_seen
+    await m.disconnect("a")
+    # Hook prunes immediately on disconnect.
+    assert "a" not in mon._last_seen
+    # Tick is also defensive against orphaned entries.
+    mon._last_seen["ghost"] = 0.0
+    await mon.tick()
+    assert "ghost" not in mon._last_seen

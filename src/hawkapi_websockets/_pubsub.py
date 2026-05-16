@@ -28,10 +28,13 @@ Handler = Callable[[dict[str, Any]], Awaitable[None]]
 class RedisBackplane:
     url: str = "redis://localhost:6379/0"
     channel: str = "hawkapi:ws"
+    reconnect_initial_delay: float = 0.5
+    reconnect_max_delay: float = 30.0
     _client: Any = field(default=None, init=False)
     _pubsub: Any = field(default=None, init=False)
     _task: asyncio.Task[None] | None = field(default=None, init=False)
     _handlers: list[Handler] = field(default_factory=list, init=False)
+    _stop: asyncio.Event = field(default_factory=asyncio.Event, init=False)
 
     async def _connect(self) -> None:
         if self._client is not None:
@@ -52,6 +55,7 @@ class RedisBackplane:
         self._handlers.append(handler)
 
     async def start(self) -> None:
+        self._stop.clear()
         await self._connect()
         self._pubsub = self._client.pubsub()
         await self._pubsub.subscribe(self.channel)
@@ -59,6 +63,7 @@ class RedisBackplane:
             self._task = asyncio.create_task(self._listen())
 
     async def stop(self) -> None:
+        self._stop.set()
         if self._task is not None:
             self._task.cancel()
             try:
@@ -81,19 +86,46 @@ class RedisBackplane:
             self._client = None
 
     async def _listen(self) -> None:
-        assert self._pubsub is not None
-        async for msg in self._pubsub.listen():
-            if msg is None or msg.get("type") != "message":
-                continue
+        delay = self.reconnect_initial_delay
+        while not self._stop.is_set():
+            if self._pubsub is None:  # pragma: no cover - defensive
+                break
             try:
-                payload: dict[str, Any] = json.loads(msg["data"])
-            except (ValueError, TypeError):
-                continue
-            for handler in self._handlers:
+                async for msg in self._pubsub.listen():
+                    if msg is None or msg.get("type") != "message":
+                        continue
+                    try:
+                        payload: dict[str, Any] = json.loads(msg["data"])
+                    except (ValueError, TypeError):
+                        continue
+                    for handler in self._handlers:
+                        try:
+                            await handler(payload)
+                        except Exception as exc:
+                            logger.warning("pubsub handler raised: %s", exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self._stop.is_set():
+                    break
+                logger.warning("redis pubsub disconnected: %s; reconnecting in %.1fs", exc, delay)
                 try:
-                    await handler(payload)
-                except Exception as exc:
-                    logger.warning("pubsub handler raised: %s", exc)
+                    await asyncio.wait_for(self._stop.wait(), timeout=delay)
+                    # _stop was set during sleep — exit cleanly.
+                    break
+                except TimeoutError:
+                    pass
+                delay = min(delay * 2, self.reconnect_max_delay)
+                try:
+                    await self._pubsub.subscribe(self.channel)
+                except Exception as resub_exc:
+                    logger.warning("redis pubsub resubscribe failed: %s", resub_exc)
+                    continue
+                # Reset delay after a successful resubscribe.
+                delay = self.reconnect_initial_delay
+            else:
+                # Generator exited cleanly without exception — done.
+                break
 
 
 def bind_manager(backplane: RedisBackplane, manager: ConnectionManager) -> None:

@@ -113,3 +113,70 @@ async def test_send_to_dispatches_bytes_and_json() -> None:
     assert ws.sent_bytes == [b"raw"]
     assert any('"k"' in t for t in ws.sent_text)
     assert "plain" in ws.sent_text
+
+
+async def test_room_validator_blocks_join() -> None:
+    import pytest
+
+    def deny(room: str, conn: object) -> bool:
+        return False
+
+    m = ConnectionManager(room_validator=deny)
+    await m.connect(FakeWebSocket(), connection_id="a")
+    with pytest.raises(PermissionError):
+        await m.join("a", "secret")
+    assert m.room_size("secret") == 0
+
+
+async def test_room_validator_allows_join() -> None:
+    async def allow(room: str, conn: object) -> bool:
+        return room == "lobby"
+
+    m = ConnectionManager(room_validator=allow)
+    await m.connect(FakeWebSocket(), connection_id="a")
+    await m.join("a", "lobby")
+    assert m.room_size("lobby") == 1
+
+
+async def test_send_timeout_drops_slow_connection() -> None:
+    m = ConnectionManager(send_timeout_seconds=0.05)
+    slow_ws = FakeWebSocket(send_delay=5.0)
+    await m.connect(slow_ws, connection_id="slow")
+    ok = await m.send_to("slow", "hi")
+    assert ok is False
+    assert "slow" not in m.connections
+
+
+async def test_send_timeout_drops_slow_broadcast_target() -> None:
+    m = ConnectionManager(send_timeout_seconds=0.05)
+    slow = FakeWebSocket(send_delay=5.0)
+    fast = FakeWebSocket()
+    await m.connect(slow, connection_id="slow")
+    await m.connect(fast, connection_id="fast")
+    sent = await m.broadcast_text("hi")
+    assert sent == 1
+    assert "slow" not in m.connections
+    assert fast.sent_text == ["hi"]
+
+
+async def test_max_connections_caps_registry() -> None:
+    import pytest
+
+    m = ConnectionManager(max_connections=2)
+    await m.connect(FakeWebSocket(), connection_id="a")
+    await m.connect(FakeWebSocket(), connection_id="b")
+    with pytest.raises(RuntimeError, match="max connections 2 reached"):
+        await m.connect(FakeWebSocket(), connection_id="c")
+    assert m.total_connections == 2
+
+
+async def test_close_all_handles_concurrent_connect() -> None:
+    """Sanity: close_all snapshots under the lock and tolerates new connects after."""
+    m = ConnectionManager()
+    for i in range(5):
+        await m.connect(FakeWebSocket(), connection_id=f"c{i}")
+    await m.close_all(code=1001)
+    assert m.total_connections == 0
+    # A subsequent connect after close_all should still work.
+    await m.connect(FakeWebSocket(), connection_id="new")
+    assert m.total_connections == 1

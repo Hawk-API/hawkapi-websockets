@@ -53,7 +53,7 @@ def test_get_manager_500_when_missing() -> None:
 
     saved = _p._LAST[0]
     _p._LAST[0] = None
-    _p._ACTIVE.pop(id(app), None)
+    _p._ACTIVE.pop(app, None)
     try:
         r = TestClient(app).get("/x")
         assert r.status_code == 500
