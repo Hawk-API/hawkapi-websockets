@@ -38,8 +38,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://pypi.org/project/hawkapi-websockets/"
-Repository = "https://github.com/ashimov/hawkapi-websockets"
-Issues = "https://github.com/ashimov/hawkapi-websockets/issues"
+Repository = "https://github.com/Hawk-API/hawkapi-websockets"
+Issues = "https://github.com/Hawk-API/hawkapi-websockets/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hawkapi_websockets"]

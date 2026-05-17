@@ -1,6 +1,6 @@
 # hawkapi-websockets
 
-WebSocket utilities for [HawkAPI](https://github.com/ashimov/HawkAPI). Connection manager with rooms + broadcasting, optional Redis pub/sub backplane for multi-process fan-out, and a heartbeat monitor.
+WebSocket utilities for [HawkAPI](https://github.com/Hawk-API/HawkAPI). Connection manager with rooms + broadcasting, optional Redis pub/sub backplane for multi-process fan-out, and a heartbeat monitor.
 
 ## Install
 
@@ -106,7 +106,7 @@ async def test_chat_broadcast():
 ## Development
 
 ```bash
-git clone https://github.com/ashimov/hawkapi-websockets.git
+git clone https://github.com/Hawk-API/hawkapi-websockets.git
 cd hawkapi-websockets
 uv sync --extra dev
 uv run pytest -q
