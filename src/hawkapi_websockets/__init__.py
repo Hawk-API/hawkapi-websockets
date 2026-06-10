@@ -7,12 +7,17 @@ heartbeat monitor for liveness.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from ._heartbeat import HeartbeatConfig, HeartbeatMonitor
 from ._manager import Connection, ConnectionManager, WebSocketLike
 from ._plugin import get_manager, init_websockets, resolve_manager
 from ._pubsub import RedisBackplane, bind_manager
 
-__version__ = "0.2.1"
+try:
+    __version__ = version("hawkapi-websockets")
+except PackageNotFoundError:  # pragma: no cover - running from a source tree without install
+    __version__ = "0.0.0"
 
 __all__ = [
     "Connection",
