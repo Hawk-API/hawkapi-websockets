@@ -23,7 +23,7 @@ async def test_bind_manager_dispatches_json_message() -> None:
     ws = FakeWebSocket()
     await m.connect(ws, connection_id="a")
     bp = RedisBackplane()
-    bind_manager(bp, m)
+    bind_manager(bp, m, allow_global=True)
     handler = bp._handlers[0]
     await handler({"kind": "json", "payload": {"k": "v"}})
     assert ws.sent_text and '"k"' in ws.sent_text[0]
@@ -35,10 +35,20 @@ async def test_bind_manager_respects_exclude() -> None:
     await m.connect(a, connection_id="a")
     await m.connect(b, connection_id="b")
     bp = RedisBackplane()
-    bind_manager(bp, m)
+    bind_manager(bp, m, allow_global=True)
     await bp._handlers[0]({"kind": "text", "payload": "hi", "exclude": ["a"]})
     assert a.sent_text == []
     assert b.sent_text == ["hi"]
+
+
+async def test_bind_manager_drops_room_less_message_by_default() -> None:
+    m = ConnectionManager()
+    ws = FakeWebSocket()
+    await m.connect(ws, connection_id="a")
+    bp = RedisBackplane()
+    bind_manager(bp, m)
+    await bp._handlers[0]({"kind": "text", "payload": "leak"})
+    assert ws.sent_text == []
 
 
 class _FakePubSub:

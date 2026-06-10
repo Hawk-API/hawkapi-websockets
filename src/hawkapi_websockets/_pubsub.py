@@ -128,11 +128,20 @@ class RedisBackplane:
                 break
 
 
-def bind_manager(backplane: RedisBackplane, manager: ConnectionManager) -> None:
+def bind_manager(
+    backplane: RedisBackplane,
+    manager: ConnectionManager,
+    *,
+    allow_global: bool = False,
+) -> None:
     """Re-emit every backplane message through ``manager.broadcast_*``.
 
     Each incoming message must include a ``kind`` field (``"text"`` / ``"json"``),
     optional ``room``, and the ``payload`` to dispatch.
+
+    A message with no ``room`` (or ``room: null`` from Redis) would otherwise
+    fan out to **every** connection, leaking across tenants (A01). Such messages
+    are dropped and logged unless ``allow_global=True`` is set explicitly.
     """
 
     async def _dispatch(message: dict[str, Any]) -> None:
@@ -140,6 +149,9 @@ def bind_manager(backplane: RedisBackplane, manager: ConnectionManager) -> None:
         room = message.get("room")
         payload = message.get("payload")
         exclude = message.get("exclude", [])
+        if room is None and not allow_global:
+            logger.warning("dropping room-less pubsub message (allow_global=False): kind=%s", kind)
+            return
         if kind == "text" and isinstance(payload, str):
             await manager.broadcast_text(payload, room=room, exclude=exclude)
         else:

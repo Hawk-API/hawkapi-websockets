@@ -13,6 +13,11 @@ class FakeWebSocket:
     closed_code: int = 0
     fail_on_send: bool = False
     send_delay: float = 0.0
+    headers: dict[str, str] = field(default_factory=dict)
+    incoming: list[str] = field(default_factory=list)
+
+    async def receive_text(self) -> str:
+        return self.incoming.pop(0)
 
     async def send_text(self, data: str) -> None:
         if self.send_delay:

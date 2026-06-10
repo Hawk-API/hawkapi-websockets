@@ -170,6 +170,94 @@ async def test_max_connections_caps_registry() -> None:
     assert m.total_connections == 2
 
 
+async def test_default_max_connections_is_bounded() -> None:
+    m = ConnectionManager()
+    assert m.max_connections == 10_000
+
+
+async def test_check_origin_allows_when_unset() -> None:
+    m = ConnectionManager()
+    assert m.check_origin(FakeWebSocket()) is True
+
+
+async def test_check_origin_validates_allow_list() -> None:
+    m = ConnectionManager(allowed_origins={"https://good.example"})
+    ok = FakeWebSocket(headers={"origin": "https://good.example"})
+    bad = FakeWebSocket(headers={"origin": "https://evil.example"})
+    missing = FakeWebSocket()
+    assert m.check_origin(ok) is True
+    assert m.check_origin(bad) is False
+    assert m.check_origin(missing) is False
+
+
+async def test_on_connect_hook_rejects() -> None:
+    import pytest
+
+    async def deny(ws: object, meta: dict) -> bool:
+        return False
+
+    m = ConnectionManager(on_connect=deny)
+    with pytest.raises(PermissionError):
+        await m.connect(FakeWebSocket(), connection_id="a")
+    assert m.total_connections == 0
+
+
+async def test_on_connect_hook_allows() -> None:
+    seen: list[dict] = []
+
+    async def allow(ws: object, meta: dict) -> bool:
+        seen.append(meta)
+        return True
+
+    m = ConnectionManager(on_connect=allow)
+    await m.connect(FakeWebSocket(), connection_id="a", metadata={"user": "x"})
+    assert m.total_connections == 1
+    assert seen == [{"user": "x"}]
+
+
+async def test_connect_enforces_room_validator_on_initial_rooms() -> None:
+    import pytest
+
+    def deny(room: str, conn: object) -> bool:
+        return False
+
+    m = ConnectionManager(room_validator=deny)
+    with pytest.raises(PermissionError):
+        await m.connect(FakeWebSocket(), connection_id="a", rooms=["secret"])
+    assert m.total_connections == 0
+    assert m.room_size("secret") == 0
+
+
+async def test_require_room_blocks_global_broadcast() -> None:
+    import pytest
+
+    m = ConnectionManager(require_room=True)
+    await m.connect(FakeWebSocket(), connection_id="a", rooms=["lobby"])
+    with pytest.raises(ValueError, match="room is required"):
+        await m.broadcast_text("hi")
+    # Room-scoped broadcast still works.
+    assert await m.broadcast_text("hi", room="lobby") == 1
+
+
+async def test_receive_text_rejects_oversized() -> None:
+    import pytest
+
+    m = ConnectionManager(max_message_bytes=4)
+    ws = FakeWebSocket(incoming=["toolong"])
+    conn = await m.connect(ws, connection_id="a")
+    with pytest.raises(ValueError, match="max_message_bytes"):
+        await m.receive_text(conn)
+    assert ws.closed_code == 1009
+    assert "a" not in m.connections
+
+
+async def test_receive_json_within_limit() -> None:
+    m = ConnectionManager()
+    ws = FakeWebSocket(incoming=['{"k": "v"}'])
+    conn = await m.connect(ws, connection_id="a")
+    assert await m.receive_json(conn) == {"k": "v"}
+
+
 async def test_close_all_handles_concurrent_connect() -> None:
     """Sanity: close_all snapshots under the lock and tolerates new connects after."""
     m = ConnectionManager()

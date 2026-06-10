@@ -32,6 +32,94 @@ async def ws_room(websocket: WebSocket, room: str, m: ConnectionManager = Depend
         await m.broadcast_json({"event": "left", "id": conn.id}, room=room)
 ```
 
+## Authentication & Security
+
+WebSockets bypass CORS, so the browser's same-origin protections do **not** apply.
+A page on any site can open a WebSocket to your server and ride the user's cookies
+(Cross-Site WebSocket Hijacking, CSWSH). This library is secure-by-default where it
+can be and provides hooks where enforcement has to live in your app.
+
+### Validate the Origin (CSWSH)
+
+Pass `allowed_origins` and call `check_origin` **before** `accept()`:
+
+```python
+m = ConnectionManager(allowed_origins={"https://app.example.com"})
+# or: init_websockets(app, allowed_origins={"https://app.example.com"})
+
+
+@app.websocket("/ws/{room}")
+async def ws_room(websocket, room, m=Depends(get_manager)):
+    if not m.check_origin(websocket):
+        await websocket.close(code=4403)  # forbidden
+        return
+    await websocket.accept()
+    ...
+```
+
+When `allowed_origins` is `None` (the default) `check_origin` returns `True` and
+performs **no** validation — you are responsible for enforcing it out of band.
+Leaving it unset on a cookie-authenticated endpoint exposes you to CSWSH.
+
+### Authenticate the connection
+
+Provide an `on_connect` hook. It runs inside `connect()` before the connection is
+tracked; return `False` (or raise) to reject — `connect()` raises `PermissionError`.
+Authenticate with a token sent in a **header** (e.g. `Authorization` /
+`Sec-WebSocket-Protocol`), never in the query string — query strings leak into logs,
+referrers, and proxies.
+
+```python
+async def authenticate(websocket, metadata: dict) -> bool:
+    token = (getattr(websocket, "headers", {}) or {}).get("authorization", "")
+    user = await verify_token(token)
+    if user is None:
+        return False
+    metadata["user_id"] = user.id   # mutate metadata to attach identity
+    return True
+
+
+m = ConnectionManager(on_connect=authenticate)
+```
+
+### Authorize rooms
+
+`room_validator` is enforced for **both** `join()` and the initial `rooms=[...]`
+passed to `connect()`. A denial raises `PermissionError`, so an unauthenticated
+client can never enter a room it isn't allowed into.
+
+### DoS limits
+
+- `max_connections` defaults to `10_000`. Set it to `None` only if you have your own
+  admission control — `None` means unbounded and is an A05 DoS risk.
+- `max_message_bytes` defaults to `1_048_576` (1 MiB). It is **advisory**: your
+  receive loop must enforce it. The `receive_text(conn)` / `receive_json(conn)`
+  helpers wrap the underlying receive, reject oversized frames (closing with code
+  `1009`), and drop the connection:
+
+  ```python
+  conn = await m.connect(websocket)
+  while True:
+      msg = await m.receive_text(conn)   # raises ValueError if over the limit
+      ...
+  ```
+
+### Tenant isolation
+
+- `require_room=True` makes room-less `broadcast_text`/`broadcast_json` raise
+  `ValueError`, preventing accidental cross-tenant fan-out.
+- The Redis backplane drops room-less messages by default (they would otherwise
+  broadcast to every connection). Set `bind_manager(bp, m, allow_global=True)` —
+  or `init_websockets(app, allow_global_broadcast=True)` — only if you really want
+  server-wide broadcasts.
+
+### Logging
+
+Security-relevant events are logged on the `hawkapi_websockets` logger: `info` on
+connect/disconnect, `warning` on Origin rejection, `on_connect`/`room_validator`
+denial, oversized messages, dropped room-less backplane messages, and when
+`max_connections` is hit.
+
 ## Broadcasting
 
 ```python

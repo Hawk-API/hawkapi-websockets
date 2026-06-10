@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-06-10
+
+Security hardening:
+
+- `ConnectionManager` gained an `allowed_origins` option and `check_origin()` to defend against cross-site WebSocket hijacking (CWE-1385).
+- Added an `on_connect` authentication hook invoked before a connection is tracked; returning falsy raises `PermissionError` (CWE-306).
+- `max_connections` now defaults to 10,000 (was unlimited) to bound resource exhaustion; `None` remains an explicit opt-out (CWE-770).
+- Added `max_message_bytes` (default 1 MiB) with `receive_text`/`receive_json` helpers that reject oversized frames (CWE-770).
+- `room_validator` is now enforced for rooms passed to `connect(rooms=...)`, not only `join()` (CWE-862).
+- Added `require_room` to forbid room-less (global) broadcasts; the Redis backplane drops room-less messages unless `allow_global` is set (CWE-200).
+- Security-relevant events (connect/disconnect, origin/auth/room denials, connection-cap hits) are now logged (CWE-778).
+
 ## 0.2.1 — 2026-05-16
 
 `HeartbeatMonitor.is_alive(cid)` now returns `False` for connections that

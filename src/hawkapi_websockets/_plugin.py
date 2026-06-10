@@ -33,15 +33,23 @@ def init_websockets(
     manager: ConnectionManager | None = None,
     backplane: RedisBackplane | None = None,
     start_backplane: bool = True,
+    allowed_origins: set[str] | None = None,
+    allow_global_broadcast: bool = False,
 ) -> ConnectionManager:
     """Attach a :class:`ConnectionManager` to ``app.state.websockets``.
 
     When ``backplane`` is provided, every published message is fanned out into
     ``manager`` automatically.
+
+    ``allowed_origins`` is forwarded to the manager for Origin validation
+    (CSWSH / A07) when no explicit ``manager`` is supplied. ``allow_global_broadcast``
+    controls whether room-less backplane messages are allowed to fan out to every
+    connection (A01); it defaults to ``False`` (such messages are dropped).
     """
-    manager = manager or ConnectionManager()
+    if manager is None:
+        manager = ConnectionManager(allowed_origins=allowed_origins)
     if backplane is not None:
-        bind_manager(backplane, manager)
+        bind_manager(backplane, manager, allow_global=allow_global_broadcast)
         if start_backplane and hasattr(app, "on_startup"):
 
             async def _start() -> None:
