@@ -13,6 +13,11 @@ from typing import Any, Protocol
 
 logger = logging.getLogger("hawkapi_websockets")
 
+# Sentinel distinguishing "argument not passed" from an explicit None
+# (None means "no limit"). Typed as Any so it is accepted as a default for
+# int | None parameters without tripping the type checker.
+_UNSET: Any = object()
+
 
 class WebSocketLike(Protocol):
     async def send_text(self, data: str) -> None: ...
@@ -235,7 +240,7 @@ class ConnectionManager:
         self,
         conn: Connection,
         *,
-        max_bytes: int | None = ...,  # type: ignore[assignment]
+        max_bytes: int | None = _UNSET,
     ) -> str:
         """Receive one text frame, rejecting oversized payloads (A05 DoS).
 
@@ -245,7 +250,7 @@ class ConnectionManager:
         in your handler loop instead of calling ``websocket.receive_text``
         directly.
         """
-        limit = self.max_message_bytes if max_bytes is ... else max_bytes
+        limit = self.max_message_bytes if max_bytes is _UNSET else max_bytes
         data: str = await conn.websocket.receive_text()  # type: ignore[attr-defined]
         if limit is not None and len(data.encode("utf-8")) > limit:
             logger.warning("oversized message from %s; closing", conn.id)
@@ -260,7 +265,7 @@ class ConnectionManager:
         self,
         conn: Connection,
         *,
-        max_bytes: int | None = ...,  # type: ignore[assignment]
+        max_bytes: int | None = _UNSET,
     ) -> Any:
         """Receive one text frame (size-checked) and parse it as JSON."""
         return json.loads(await self.receive_text(conn, max_bytes=max_bytes))
